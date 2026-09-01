@@ -1,0 +1,15 @@
+{
+	"name": "adf-atliq-ab",
+	"properties": {
+		"trustModeClaimForMi": {
+			"value": "Disabled",
+			"editable": true
+		}
+	},
+	"location": "centralindia",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "161ad7d9-5960-4982-b6a5-5407aa3cc531",
+		"tenantId": "48fa59e0-abce-4e09-95f8-802bedbd66b8"
+	}
+}
