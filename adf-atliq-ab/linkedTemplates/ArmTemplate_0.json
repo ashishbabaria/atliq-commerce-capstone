@@ -791,7 +791,7 @@
 						},
 						"userProperties": [],
 						"typeProperties": {
-							"notebookPath": "Workspace/Users/ashish@alphainterbiz.com/atliq-commerce-capstone/phase1-batch/databricks/10_silver_full_dims"
+							"notebookPath": "/Workspace/Users/ashish@alphainterbiz.com/atliq-commerce-capstone/phase1-batch/databricks/10_silver_full_dims"
 						},
 						"linkedServiceName": {
 							"referenceName": "ls_databricks",
