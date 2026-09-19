@@ -1,5 +1,5 @@
 {
-	"name": "pl_ingest_bronze",
+	"name": "pl_nightly_sync",
 	"properties": {
 		"activities": [
 			{
