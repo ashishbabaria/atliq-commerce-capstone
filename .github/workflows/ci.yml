@@ -1,0 +1,22 @@
+name: dbt-ci
+on: [pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DBT_PROFILES_DIR: phase1-batch/dbt/atliq_gold
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dbt
+        run: pip install dbt-databricks
+      - name: dbt deps + build + test (throwaway CI schema)
+        working-directory: phase1-batch/dbt/atliq_gold
+        run: |
+          dbt deps
+          dbt build --target ci
