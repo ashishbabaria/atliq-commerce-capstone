@@ -64,7 +64,7 @@
 						"type": "Lookup",
 						"dependsOn": [
 							{
-								"activity": "Set run_start_at",
+								"activity": "Log run start",
 								"dependencyConditions": [
 									"Succeeded"
 								]
@@ -321,7 +321,7 @@
 						"type": "Copy",
 						"dependsOn": [
 							{
-								"activity": "Set run_start_at",
+								"activity": "Log run start",
 								"dependencyConditions": [
 									"Succeeded"
 								]
@@ -389,7 +389,7 @@
 						"type": "Copy",
 						"dependsOn": [
 							{
-								"activity": "Set run_start_at",
+								"activity": "Log run start",
 								"dependencyConditions": [
 									"Succeeded"
 								]
@@ -544,6 +544,106 @@
 							"referenceName": "ls_databricks",
 							"type": "LinkedServiceReference"
 						}
+					},
+					{
+						"name": "Log run start",
+						"type": "SqlServerStoredProcedure",
+						"dependsOn": [
+							{
+								"activity": "Set run_start_at",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"storedProcedureName": "[[etl].[usp_log_start]",
+							"storedProcedureParameters": {
+								"object_name": {
+									"value": "",
+									"type": "String"
+								},
+								"run_start_at": {
+									"value": {
+										"value": "@variables('run_start_at')",
+										"type": "Expression"
+									},
+									"type": "DateTime"
+								},
+								"stage": {
+									"value": "nightly",
+									"type": "String"
+								}
+							}
+						},
+						"linkedServiceName": {
+							"referenceName": "ls_azuresql",
+							"type": "LinkedServiceReference"
+						}
+					},
+					{
+						"name": "Log run success",
+						"type": "SqlServerStoredProcedure",
+						"dependsOn": [
+							{
+								"activity": "Run dbt",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"storedProcedureName": "[[etl].[usp_log_finish]",
+							"storedProcedureParameters": {
+								"message": {
+									"value": "Nightly pipeline completed",
+									"type": "String"
+								},
+								"object_name": {
+									"value": "",
+									"type": "String"
+								},
+								"rows_affected": {
+									"value": "",
+									"type": "Int64"
+								},
+								"run_start_at": {
+									"value": {
+										"value": "@variables('run_start_at')",
+										"type": "Expression"
+									},
+									"type": "DateTime"
+								},
+								"stage": {
+									"value": "nightly",
+									"type": "String"
+								},
+								"status": {
+									"value": "success",
+									"type": "String"
+								}
+							}
+						},
+						"linkedServiceName": {
+							"referenceName": "ls_azuresql",
+							"type": "LinkedServiceReference"
+						}
 					}
 				],
 				"policy": {
@@ -563,8 +663,8 @@
 				"[concat(variables('factoryId'), '/datasets/ds_adls_bronze_parquet')]",
 				"[concat(variables('factoryId'), '/datasets/ds_adls_csv_marketing')]",
 				"[concat(variables('factoryId'), '/linkedServices/ls_databricks')]",
-				"[concat(variables('factoryId'), '/datasets/ds_azuresql_generic')]",
-				"[concat(variables('factoryId'), '/linkedServices/ls_azuresql')]"
+				"[concat(variables('factoryId'), '/linkedServices/ls_azuresql')]",
+				"[concat(variables('factoryId'), '/datasets/ds_azuresql_generic')]"
 			]
 		},
 		{
@@ -831,19 +931,6 @@
 			]
 		},
 		{
-			"name": "[concat(parameters('factoryName'), '/ls_keyvault')]",
-			"type": "Microsoft.DataFactory/factories/linkedServices",
-			"apiVersion": "2018-06-01",
-			"properties": {
-				"annotations": [],
-				"type": "AzureKeyVault",
-				"typeProperties": {
-					"baseUrl": "[parameters('ls_keyvault_properties_typeProperties_baseUrl')]"
-				}
-			},
-			"dependsOn": []
-		},
-		{
 			"name": "[concat(parameters('factoryName'), '/ls_databricks')]",
 			"type": "Microsoft.DataFactory/factories/linkedServices",
 			"apiVersion": "2018-06-01",
@@ -873,6 +960,19 @@
 			"dependsOn": [
 				"[concat(variables('factoryId'), '/linkedServices/ls_keyvault')]"
 			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ls_keyvault')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureKeyVault",
+				"typeProperties": {
+					"baseUrl": "[parameters('ls_keyvault_properties_typeProperties_baseUrl')]"
+				}
+			},
+			"dependsOn": []
 		},
 		{
 			"name": "[concat(parameters('factoryName'), '/trg_nightly')]",
