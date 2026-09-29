@@ -576,10 +576,6 @@
 							"value": "",
 							"type": "String"
 						},
-						"rows_affected": {
-							"value": "",
-							"type": "Int64"
-						},
 						"run_start_at": {
 							"value": {
 								"value": "@variables('run_start_at')",
