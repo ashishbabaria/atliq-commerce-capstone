@@ -568,7 +568,7 @@
 							"storedProcedureName": "[[etl].[usp_log_start]",
 							"storedProcedureParameters": {
 								"object_name": {
-									"value": "",
+									"value": null,
 									"type": "String"
 								},
 								"run_start_at": {
@@ -616,7 +616,7 @@
 									"type": "String"
 								},
 								"object_name": {
-									"value": "",
+									"value": null,
 									"type": "String"
 								},
 								"run_start_at": {
