@@ -1,25 +1,20 @@
 """
-AtliQ Phase 2 (LEARNER STARTER) — Streaming Ops DAG
-====================================================
-The stream never stops — but the SCHEDULED work around it is your job:
-data-quality gate, table maintenance, daily rollup. Build an hourly DAG:
+AtliQ Phase 2: Streaming Ops DAG
+The stream never stops, but the scheduled work around it runs hourly:
 
     check_fresh_events  ->  optimize_tables  ->  refresh_daily_summary
 
-Setup:
-1. In docker-compose.yaml:  _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-databricks
-   then: docker compose down && docker compose up -d
-2. Airflow UI -> Admin -> Connections -> +
-   Conn Id: databricks_default | Type: Databricks
-   Host: https://<workspace>.cloud.databricks.com | Password: <PAT token>
-3. Paste your SQL warehouse HTTP path below.
+Connection: databricks_default (Databricks host + personal access token),
+created in the Airflow UI under Admin -> Connections.
 """
 from datetime import datetime, timedelta
 
-from airflow import DAG
+from airflow.sdk import DAG   # Airflow 3 import, as taught in Session 15
 from airflow.providers.databricks.operators.databricks_sql import DatabricksSqlOperator
 
-SQL_WAREHOUSE_HTTP_PATH = "/sql/1.0/warehouses/xxxxxxxxxxxxxxxx"   # <-- yours
+SQL_WAREHOUSE_HTTP_PATH = "/sql/1.0/warehouses/af3166d1352e2862"   # <-- paste yours
+CONN_ID = "databricks_default"
+S = "atliq.streaming"
 
 default_args = {
     "owner": "atliq-data-eng",
@@ -36,24 +31,53 @@ with DAG(
     tags=["atliq", "phase2", "streaming"],
 ) as dag:
 
-    # TODO 1 — Data-quality gate.
-    # A DatabricksSqlOperator that FAILS when no events landed recently.
-    # Hint: Databricks SQL has assert_true(condition, message) — write a SELECT
-    # that asserts COUNT(*) > 0 over silver_order_events for the last 2 hours.
-    # A DQ check that can never fail is worth zero marks — you must be able to
-    # demo it failing when the producer is stopped.
-    check_fresh_events = None  # replace with your operator
+    # 1. Data-quality gate: FAIL when no events reached Silver in the last 2 hours.
+    #    assert_true raises an error when its condition is false, which fails the task.
+    check_fresh_events = DatabricksSqlOperator(
+        task_id="check_fresh_events",
+        databricks_conn_id=CONN_ID,
+        http_path=SQL_WAREHOUSE_HTTP_PATH,
+        sql=f"""
+            SELECT assert_true(
+                       COUNT(*) > 0,
+                       'DQ FAIL: no events in {S}.silver_order_events in the last 2 hours'
+                   ) AS freshness_ok
+            FROM {S}.silver_order_events
+            WHERE event_ts >= current_timestamp() - INTERVAL 2 HOURS
+        """,
+        retries=0,   # stale data will not fix itself in 5 minutes: fail fast, do not retry
+    )
 
-    # TODO 2 — Table maintenance.
-    # Streaming writes create many small files. Run OPTIMIZE on
-    # silver_order_events and gold_revenue_5min.
-    optimize_tables = None  # replace with your operator
+    # 2. Maintenance: streaming writes many small files; OPTIMIZE compacts them.
+    optimize_tables = DatabricksSqlOperator(
+        task_id="optimize_tables",
+        databricks_conn_id=CONN_ID,
+        http_path=SQL_WAREHOUSE_HTTP_PATH,
+        sql=[
+            f"OPTIMIZE {S}.silver_order_events",
+            f"OPTIMIZE {S}.gold_revenue_5min",
+        ],
+    )
 
-    # TODO 3 — Daily rollup.
-    # CREATE OR REPLACE atliq.streaming.gold_daily_summary: per event_date —
-    # orders_placed, orders_paid, orders_cancelled, revenue (from paid events).
-    # Hint: COUNT_IF() and a CASE inside SUM().
-    refresh_daily_summary = None  # replace with your operator
+    # 3. Daily rollup: rebuilt from Silver each run, so it is always complete and idempotent.
+    refresh_daily_summary = DatabricksSqlOperator(
+        task_id="refresh_daily_summary",
+        databricks_conn_id=CONN_ID,
+        http_path=SQL_WAREHOUSE_HTTP_PATH,
+        sql=f"""
+            CREATE OR REPLACE TABLE {S}.gold_daily_summary AS
+            SELECT
+                to_date(event_ts)                                   AS event_date,
+                COUNT_IF(event_type = 'order_placed')               AS orders_placed,
+                COUNT_IF(event_type = 'payment_received')           AS orders_paid,
+                COUNT_IF(event_type = 'order_cancelled')            AS orders_cancelled,
+                SUM(CASE WHEN event_type = 'payment_received'
+                         THEN order_amount ELSE 0 END)              AS revenue,
+                current_timestamp()                                 AS refreshed_at
+            FROM {S}.silver_order_events
+            GROUP BY to_date(event_ts)
+        """,
+    )
 
-    # TODO 4 — Chain them in order:
-    # check_fresh_events >> optimize_tables >> refresh_daily_summary
+    # 4. Gate first, so maintenance and rollup never run on stale data.
+    check_fresh_events >> optimize_tables >> refresh_daily_summary
