@@ -38,11 +38,26 @@ PRODUCT_PRICES = {1: 2499, 2: 3299, 3: 1799, 4: 1499, 5: 4999, 6: 899, 7: 1299,
 
 
 def make_producer() -> Producer:
-    # TODO 1: return a confluent_kafka.Producer configured for Confluent Cloud.
-    # You need: bootstrap.servers, security.protocol=SASL_SSL,
-    # sasl.mechanisms=PLAIN, sasl.username (API key), sasl.password (API secret).
-    # Read the values from environment variables (see .env.example).
-    raise NotImplementedError("TODO 1: build the Producer config")
+    """Confluent Cloud producer. Credentials come from .env, never from code."""
+    conf = {
+        "bootstrap.servers": os.environ["KAFKA_BOOTSTRAP"],
+        "security.protocol": "SASL_SSL",       # encrypted connection
+        "sasl.mechanisms": "PLAIN",            # API key / secret login
+        "sasl.username": os.environ["KAFKA_API_KEY"],
+        "sasl.password": os.environ["KAFKA_API_SECRET"],
+        "client.id": "atliq-order-producer",
+        "acks": "all",                         # confirmed only when all replicas have it
+    }
+    return Producer(conf)
+
+
+def delivery_report(err, msg):
+    """Called once per event when Kafka confirms (or rejects) it."""
+    if err is not None:
+        print(f"FAILED  key={msg.key().decode()}  error={err}")
+    else:
+        print(f"OK      key={msg.key().decode()}  -> {msg.topic()} "
+              f"[partition {msg.partition()}] @ offset {msg.offset()}")
 
 
 def now_iso() -> str:
@@ -82,7 +97,7 @@ def new_order(order_id: int) -> dict:
 def run(rate: float, duration: int):
     producer = make_producer()
     topic = os.environ.get("KAFKA_TOPIC", "atliq.orders.events")
-    open_orders, next_order_id, sent = [], 100_000, 0
+    open_orders, next_order_id, sent = [], int(time.time()), 0   # unique per run
     deadline = time.time() + duration
 
     print(f"Producing to '{topic}' at ~{rate} events/sec for {duration}s ...")
@@ -101,12 +116,12 @@ def run(rate: float, duration: int):
                 events = [base_event("order_cancelled", open_orders.pop(random.randrange(len(open_orders))))]
 
             for ev in events:
-                # TODO 2: publish the event to Kafka.
-                # - key: str(ev["order_id"])  (why the order_id? think partitioning)
-                # - value: the event as a JSON string
-                # - add a delivery callback that prints success/failure
-                # Then call producer.poll(0) after the loop iteration.
-                raise NotImplementedError("TODO 2: produce the event")
+                producer.produce(
+                    topic,
+                    key=str(ev["order_id"]),      # same order -> same partition -> ordered lifecycle
+                    value=json.dumps(ev),         # the event as a JSON string
+                    callback=delivery_report,
+                )
                 sent += 1
 
             producer.poll(0)
@@ -114,9 +129,8 @@ def run(rate: float, duration: int):
     except KeyboardInterrupt:
         print("\nStopping ...")
     finally:
-        # TODO 3: make sure every buffered message is actually delivered
-        # before the script exits. (One method call — look up flush.)
-        print(f"Done. {sent} events sent.")
+        remaining = producer.flush(15)   # deliver everything still buffered
+        print(f"Done. {sent} events sent, {remaining} undelivered.")
 
 
 if __name__ == "__main__":
