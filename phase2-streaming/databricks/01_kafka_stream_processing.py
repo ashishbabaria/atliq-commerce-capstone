@@ -189,12 +189,52 @@ print("Silver rows:", spark.table(SILVER).count())
 
 # COMMAND ----------
 
-# TODO: Task 2 — your Silver stream here
+gold_df = (
+    spark.readStream.table(SILVER)
+    .filter(F.col("event_type") == "payment_received")   # revenue = paid events only
+    .withWatermark("event_ts", "10 minutes")             # watermarks do not travel between tables, so set it again
+    .groupBy(F.window("event_ts", "5 minutes"))           # tumbling: fixed, non-overlapping 5-min buckets
+    .agg(
+        F.count("*").alias("orders_paid"),
+        F.sum("order_amount").alias("revenue"),
+    )
+    .select(
+        F.col("window.start").alias("window_start"),
+        F.col("window.end").alias("window_end"),
+        "orders_paid", "revenue",
+    )
+)
+
+gold_q = (
+    gold_df.writeStream
+    .outputMode("append")                            # a window is written once, only after it closes
+    .option("checkpointLocation", f"{CKPT}/gold")   # Gold's own checkpoint
+    .trigger(availableNow=True)
+    .toTable(GOLD)
+)
+gold_q.awaitTermination()
+print("Gold windows:", spark.table(GOLD).count())
 
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Lag Query
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT MAX(window_end) AS latest_closed_window, current_timestamp() AS now
+# MAGIC FROM atliq.streaming.gold_revenue_5min;
+
+# COMMAND ----------
+
 # MAGIC %md ## Verify (given)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT * FROM atliq.streaming.gold_revenue_5min ORDER BY window_start DESC LIMIT 12;
 
 # COMMAND ----------
 
@@ -204,5 +244,21 @@ print("Silver rows:", spark.table(SILVER).count())
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Reconcile Gold Against Silver
+
+# COMMAND ----------
+
 # MAGIC %sql
-# MAGIC SELECT * FROM atliq.streaming.gold_revenue_5min ORDER BY window_start DESC LIMIT 12;
+# MAGIC SELECT g.window_start, g.orders_paid,
+# MAGIC        g.revenue AS gold_revenue, s.revenue AS silver_revenue,
+# MAGIC        g.revenue - s.revenue AS diff
+# MAGIC FROM atliq.streaming.gold_revenue_5min g
+# MAGIC JOIN (
+# MAGIC     SELECT window(event_ts, '5 minutes').start AS window_start,
+# MAGIC            SUM(order_amount) AS revenue
+# MAGIC     FROM atliq.streaming.silver_order_events
+# MAGIC     WHERE event_type = 'payment_received'
+# MAGIC     GROUP BY 1
+# MAGIC ) s ON g.window_start = s.window_start
+# MAGIC ORDER BY g.window_start DESC;
