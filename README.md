@@ -7,7 +7,7 @@ companies.
 | Lane | Question it answers | Status |
 |---|---|---|
 | [Phase 1: Batch](phase1-batch/) | What happened yesterday? | Complete |
-| Phase 2: Speed | What is happening right now? | In progress |
+| [Phase 2: Speed](phase2-streaming/) | What is happening right now? | Complete |
 
 ## Repository structure
 
@@ -16,7 +16,8 @@ atliq-commerce-capstone/
 ├── .github/workflows/    CI: dbt build + test on every pull request
 ├── phase1-batch/         Batch lane: nightly OLTP to lakehouse to Fabric
 │   └── docs/             Milestone decks (PDF) and screenshots
-└── phase2-streaming/     Speed lane: real-time order events (Phase 2)
+└── phase2-streaming/     Speed lane: Kafka to Databricks streaming, Airflow ops
+    └── docs/             Task decks (PDF), screenshots and write-up
 ```
 
 ## Phase 1: Batch Lane
@@ -39,16 +40,33 @@ and design decisions: **[phase1-batch/README.md](phase1-batch/README.md)**.
 
 ## Phase 2: Speed Lane
 
-Real-time order events stream through Kafka, are processed continuously by Databricks
-Structured Streaming into the same Medallion pattern, and Airflow runs the scheduled
-work around the stream. Standalone: it does not touch the Phase 1 deployment.
+Order events stream from a producer through Kafka into the same Medallion pattern within
+seconds, processed continuously by Databricks Structured Streaming, while an hourly
+Airflow DAG runs the scheduled work around the stream. Standalone: it shares business
+keys with Phase 1, never tables, so no order is counted twice.
+
+```
+Python producer          order events, keyed by order_id
+   -> Confluent Kafka    topic atliq.orders.events
+      -> Bronze          raw Kafka records          [Databricks Structured Streaming]
+      -> Silver          parsed, de-duplicated
+      -> Gold            5-minute revenue windows
+   -> Airflow, hourly    freshness gate, OPTIMIZE, daily rollup
+```
+
+Four tasks, each documented step by step with screenshots. Full detail, results,
+design decisions and the write-up: **[phase2-streaming/README.md](phase2-streaming/README.md)**.
 
 ## Engineering notes
 
 - **Secrets** are never committed. dbt reads its connection from environment variables;
   CI injects them from GitHub repository secrets; the nightly job reads its token from
-  Azure Key Vault through a Databricks secret scope.
+  Azure Key Vault through a Databricks secret scope. In the speed lane, Kafka credentials
+  sit in a git-ignored `.env` locally and a Databricks secret scope in the workspace, and
+  Airflow's Databricks token is stored encrypted and scoped to SQL only.
 - **Idempotency** at every layer: watermark ingestion, Silver MERGE on the business key,
-  and dbt rebuilding Gold from Silver. Re-running the chain never double-counts.
-- **Build artifacts** (dbt target and packages, logs, virtual environments) are excluded
-  via .gitignore.
+  and dbt rebuilding Gold from Silver. Re-running the chain never double-counts. In the
+  speed lane, one checkpoint per stream and de-duplication on `event_id` give the same
+  guarantee on restart.
+- **Build artifacts** (dbt target and packages, logs, virtual environments, Airflow
+  runtime folders) are excluded via .gitignore.
